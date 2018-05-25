@@ -52,11 +52,17 @@ class scoreboard:
 		cdef str friends = ""
 		cdef str order = ""
 		cdef str limit = ""
-
+		
 		# Find personal best score
 		if self.userID != 0:
 			# Query parts
-			select = "SELECT id FROM scores WHERE userid = %(userid)s AND beatmap_md5 = %(md5)s AND play_mode = %(mode)s AND completed = 3"
+			select = "SELECT id FROM scores WHERE userid = %(userid)s AND beatmap_md5 = %(md5)s AND play_mode = %(mode)s AND completed >= 3"
+
+
+			if self.country:
+				country = "AND (mods & 536879232 > 0)"
+			else:
+				country = "AND (mods & 536879232 < 1)"
 
 			# Mods
 			if self.mods > -1:
@@ -87,13 +93,7 @@ class scoreboard:
 
 		# Get top 50 scores
 		select = "SELECT *"
-		joins = "FROM scores STRAIGHT_JOIN users ON scores.userid = users.id STRAIGHT_JOIN users_stats ON users.id = users_stats.id WHERE scores.beatmap_md5 = %(beatmap_md5)s AND scores.play_mode = %(play_mode)s AND scores.completed = 3 AND (users.privileges & 1 > 0 OR users.id = %(userid)s)"
-
-		# Country ranking
-		if self.country:
-			country = "AND users_stats.country = (SELECT country FROM users_stats WHERE id = %(userid)s LIMIT 1)"
-		else:
-			country = ""
+		joins = "FROM scores STRAIGHT_JOIN users ON scores.userid = users.id STRAIGHT_JOIN users_stats ON users.id = users_stats.id WHERE scores.beatmap_md5 = %(beatmap_md5)s AND scores.play_mode = %(play_mode)s AND scores.completed >= 3 AND (users.privileges & 1 > 0 OR users.id = %(userid)s)"
 
 		# Mods ranking (ignore auto, since we use it for pp sorting)
 		if self.mods > -1 and self.mods & modsEnum.AUTOPLAY == 0:
@@ -107,14 +107,6 @@ class scoreboard:
 		else:
 			friends = ""
 
-		# Sort and limit at the end
-		if self.mods <= -1 or self.mods & modsEnum.AUTOPLAY == 0:
-			# Order by score if we aren't filtering by mods or autoplay mod is disabled
-			order = "ORDER BY score DESC"
-		elif self.mods & modsEnum.AUTOPLAY > 0:
-			# Otherwise, filter by pp
-			order = "ORDER BY pp DESC"
-		limit = "LIMIT 50"
 
 		# Build query, get params and run query
 		query = buildQuery(locals())
