@@ -37,6 +37,7 @@ from handlers import osuSearchSetHandler
 from handlers import redirectHandler
 from handlers import submitModularHandler
 from handlers import uploadScreenshotHandler
+from handlers import RateHandler
 from helpers import config
 from helpers import consoleHelper
 from common import generalUtils
@@ -62,6 +63,7 @@ def make_app():
 		(r"/d/(.*)", downloadMapHandler.handler),
 		(r"/s/(.*)", downloadMapHandler.handler),
 		(r"/web/replays/(.*)", getFullReplayHandler.handler),
+		(r"/web/osu-rate.php", RateHandler.handler),
 
 		(r"/p/verify", redirectHandler.handler, dict(destination="https://ripple.moe/index.php?p=2")),
 		(r"/u/(.*)", redirectHandler.handler, dict(destination="https://ripple.moe/index.php?u={}")),
@@ -76,7 +78,7 @@ def make_app():
 
 		# Not done yet
 		(r"/web/lastfm.php", emptyHandler.handler),
-		(r"/web/osu-rate.php", emptyHandler.handler),
+		
 		(r"/web/osu-comment.php", emptyHandler.handler),
 		(r"/web/osu-checktweets.php", emptyHandler.handler),
 
