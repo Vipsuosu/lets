@@ -265,7 +265,7 @@ def calculatePP(userID, gameMode):
 	if bestPPScores is not None:
 		k = 0
 		for i in bestPPScores:
-			new = i["pp"] * pow(0.95, k)
+			new = i["pp"] * pow(0.97, k)
 			totalPP += new
 			k += 1
 
