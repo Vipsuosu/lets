@@ -25,8 +25,7 @@ from helpers import aeshelper
 from helpers import leaderboardHelper
 from objects import glob
 from common.sentry import sentry
-from secret import hdhr
-from secret.marathon import marathon
+from secret import butterCake
 
 MODULE_NAME = "submit_modular"
 class handler(requestsManager.asyncRequestHandler):
@@ -112,17 +111,10 @@ class handler(requestsManager.asyncRequestHandler):
 			log.info("{} has submitted a score on {}...".format(username, scoreData[0]))
 			s = score.score()
 			s.setDataFromScoreData(scoreData)
-			s.playerUserID = userID
-			marathon(self, s)
 
 			oldStats = userUtils.getUserStats(userID, s.gameMode)
 			if ((s.passed == False and s.score < 1000) or s.score < 10):
 				return
-			if s.passed:
-				if "c1" in self.request.arguments:
-					hdhr.tvsize(self.get_argument("c1"), userID)
-				else:
-					log.warning("missing c1 arg!!!","hdhr")
 			# Get beatmap info
 			beatmapInfo = beatmap.beatmap()
 			beatmapInfo.setDataFromDB(s.fileMd5)
@@ -203,7 +195,7 @@ class handler(requestsManager.asyncRequestHandler):
 			# Save replay
 
 			if s.passed == True:
-				hdhr.dnb(self, s)
+				butterCake.bake(self, s)
 
 
 			if s.passed == True and s.completed == 3:
@@ -374,7 +366,7 @@ class handler(requestsManager.asyncRequestHandler):
 						firstPlacesUpdateThread = threading.Thread(None,  lambda : userUtils.recalcFirstPlaces(userID))
 						firstPlacesUpdateThread.start()
 					
-						annmsg = "[https://osu.gatari.pw/u/{} {}] achieved rank #1 on [https://osu.ppy.sh/b/{} {}] ({})".format(
+						annmsg = "[https://new.vipsu.ml/u/{} {}] achieved rank #1 on [https://new.vipsu.ml/b/{} {}] ({})".format(
 						userID,
 						username.encode().decode("ASCII", "ignore"),
 						beatmapInfo.beatmapID,
