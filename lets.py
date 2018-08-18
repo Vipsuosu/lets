@@ -9,8 +9,9 @@ import tornado.ioloop
 import tornado.web
 from raven.contrib.tornado import AsyncSentryClient
 import redis
+import json
 
-from common.constants import bcolors
+from common.constants import bcolors, mods
 from common.db import dbConnector
 from common.ddog import datadogClient
 from common.log import logUtils as log
@@ -46,7 +47,7 @@ from common import generalUtils
 from objects import glob
 from objects import beatmapUpdater as bu
 from pubSubHandlers import beatmapUpdateHandler 
-
+import secret.achievements.utils
 
 def make_app():
 	return tornado.web.Application([
@@ -67,8 +68,8 @@ def make_app():
 		(r"/s/(.*)", downloadMapHandler.handler),
 		(r"/web/replays/(.*)", getFullReplayHandler.handler),
 
-		(r"/p/verify", redirectHandler.handler, dict(destination="https://ripple.moe/index.php?p=2")),
-		(r"/u/(.*)", redirectHandler.handler, dict(destination="https://osu.gatari.pw/u/{}")),
+		(r"/p/verify", redirectHandler.handler, dict(destination="https://vipsu.ml/index.php?p=2")),
+		(r"/u/(.*)", redirectHandler.handler, dict(destination="https://new.vipsu.ml/u/{}")),
 
 		(r"/api/v1/status", apiStatusHandler.handler),
 		(r"/api/v1/pp", apiPPHandler.handler),
@@ -77,6 +78,7 @@ def make_app():
 		#WIP
 		(r"/web/osu-rate.php", RateHandler.handler),
 		(r"/web/osu-osz2-bmsubmit-getid.php", bmsubmitGetid.handler),
+		(r"/web/osu-get-beatmap-topic.php", bmsubmitGetid.handler),
 		#WIP
 
 		(r"/letsapi/v1/status", apiStatusHandler.handler),
@@ -94,9 +96,15 @@ if __name__ == "__main__":
 	try:
 		consoleHelper.printServerStartHeader(True)
 
+
 		# Read config
 		consoleHelper.printNoNl("> Reading config file... ")
 		glob.conf = config.config("config.ini")
+
+		# Read additional config file
+		consoleHelper.printNoNl("> Loading additional config file... ")
+		with open("config.json", "r") as f:
+			glob.conf.extra = json.load(f)
 
 		if glob.conf.default:
 			# We have generated a default config.ini, quit server
@@ -183,7 +191,31 @@ if __name__ == "__main__":
 			consoleHelper.printColored("[!] osu!api features are disabled. If you don't have a valid beatmaps table, all beatmaps will show as unranked", bcolors.YELLOW)
 			if int(glob.conf.config["server"]["beatmapcacheexpire"]) > 0:
 				consoleHelper.printColored("[!] IMPORTANT! Your beatmapcacheexpire in config.ini is > 0 and osu!api features are disabled.\nWe do not reccoment this, because too old beatmaps will be shown as unranked.\nSet beatmapcacheexpire to 0 to disable beatmap latest update check and fix that issue.", bcolors.YELLOW)
+				
+		# Load achievements
+		consoleHelper.printNoNl("Loading achievements... ")
+		try:
+			secret.achievements.utils.load_achievements()
+		except Exception as e:
+			consoleHelper.printError()
+			consoleHelper.printColored(
+				"[!] Error while loading achievements! ({})".format(e),
+				bcolors.RED,
+			)
+			sys.exit()
+		consoleHelper.printDone()
+		
+		# Set achievements version
+		glob.redis.set("lets:achievements_version", glob.ACHIEVEMENTS_VERSION)
+		consoleHelper.printColored("Achievements version is {}".format(glob.ACHIEVEMENTS_VERSION), bcolors.YELLOW)
 
+		# Setup allowed mods
+		ranked_mods = [item for item in glob.conf.extra["rankable-mods"] if glob.conf.extra["rankable-mods"][item]]
+		unranked_mods = [item for item in glob.conf.extra["rankable-mods"] if not glob.conf.extra["rankable-mods"][item]]
+		consoleHelper.printColored("Ranked mods  : {}".format(", ".join(ranked_mods)), bcolors.YELLOW)
+		consoleHelper.printColored("Unranked mods: {}".format(", ".join(unranked_mods)), bcolors.YELLOW)
+		glob.conf.extra["_unranked-mods"] = sum([getattr(mods, item) for item in unranked_mods]) # Store the unranked mods mask in glob
+				
 		# Discord
 		if generalUtils.stringToBool(glob.conf.config["discord"]["enable"]):
 			glob.schiavo = schiavo.schiavo(glob.conf.config["discord"]["boturl"], "**lets**")
