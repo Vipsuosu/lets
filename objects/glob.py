@@ -9,6 +9,7 @@ try:
 		VERSION = f.read().strip()
 except:
 	VERSION = "Unknown"
+ACHIEVEMENTS_VERSION = 1
 
 DATADOG_PREFIX = "lets"
 db = None
@@ -16,6 +17,7 @@ redis = None
 conf = None
 application = None
 pool = None
+pascoa ={}
 
 busyThreads = 0
 debug = False
@@ -28,3 +30,4 @@ personalBestCache = personalBestCache.personalBestCache()
 fileBuffers = fileBuffer.buffersList()
 dog = datadogClient.datadogClient()
 schiavo = schiavo.schiavo()
+achievementClasses = {}
