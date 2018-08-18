@@ -1,6 +1,7 @@
 import os
 import sys
 import traceback
+import time
 
 import tornado.gen
 import tornado.web
@@ -50,16 +51,18 @@ class handler(requestsManager.asyncRequestHandler):
 				screenshotID = generalUtils.randomString(8)
 				if not os.path.isfile(".data/screenshots/{}.jpg".format(screenshotID)):
 					found = True
+					glob.db.execute("INSERT INTO screenshots (ss_user_id, ss_name, ss_time) VALUES (%s, %s, %s)", [userID, screenshotID, int(time.time())]);
+
 
 			# Write screenshot file to .data folder
 			with open(".data/screenshots/{}.jpg".format(screenshotID), "wb") as f:
 				f.write(self.request.files["ss"][0]["body"])
-
+				
 			# Output
 			log.info("New screenshot ({})".format(screenshotID))
 
 			# Return screenshot link
-			self.write("{}/ss/{}.jpg".format("https://osu.gatari.pw", screenshotID))
+			self.write("{}/ss/{}.jpg".format("https://vipsu.ml", screenshotID))
 		except exceptions.invalidArgumentsException:
 			pass
 		except exceptions.loginFailedException:
