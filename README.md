@@ -19,6 +19,7 @@ This server handles every non real time client feature, so:
 - Progressbar2 (only for `tomejerry.py`  )
 - Raven
 - Datadog
+- Panda
 - oppai
 
 ## How to set up LETS
