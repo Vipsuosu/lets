@@ -65,4 +65,4 @@ This project is licensed under the GNU AGPL 3 License.
 See the "LICENSE" file for more information.  
 This project contains code taken by reference from [osu-performance](https://github.com/ppy/osu-performance) by Tom94.  
 © 2017 Mikhail Tretyakov 
-© 2016-2017 Giuseppe Guerra
+© 2016-2018 Giuseppe Guerra
