@@ -23,7 +23,7 @@ def printServerStartHeader(asciiArt):
 
 
 	printColored("> Yee Xd", bcolors.GREEN)
-	printColored("> Made by the Ripple team 2016-2017. Gatari team 2017", bcolors.GREEN)
+	printColored("> Made by the Ripple team 2016-2017. Gatari,Vipsu team 2018", bcolors.GREEN)
 	printColored("> {}https://github.com/xxdstem/lets".format(bcolors.UNDERLINE), bcolors.GREEN)
 	printColored("> Press CTRL+C to exit\n", bcolors.GREEN)
 
