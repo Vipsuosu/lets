@@ -20,7 +20,7 @@ class handler(requestsManager.asyncRequestHandler):
 		try:
 			username = self.get_argument("u")
 			password = self.get_argument("h")
-			response = requests.get("https://new.vipsu.ml/api/v1/users/favs?u={0}&h={1}".format(username,password))
+			response = requests.get("https://osu.vipsu.ml/api/v1/users/favs?u={0}&h={1}".format(username,password))
 			output += response.text
 		finally:
 			self.write(output)

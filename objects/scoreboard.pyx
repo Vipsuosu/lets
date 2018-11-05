@@ -41,7 +41,7 @@ class scoreboard:
 		self.scores.append(-1)
 
 		# Make sure the beatmap is ranked
-		if self.beatmap.rankedStatus < rankedStatuses.RANKED:
+		if self.beatmap.rankedStatus not in glob.conf.extra["_allowed_beatmap_rank"]:
 			return
 
 		# Query parts
@@ -63,11 +63,11 @@ class scoreboard:
 				country = "AND (mods & 536879232 > 0)"
 			else:
 				country = "AND (mods & 536879232 < 1)"
-
-			# Mods
+				
+			# Mods 
 			if self.mods > -1:
 				mods = "AND mods = %(mods)s"
-
+ 
 			# Friends ranking
 			if self.friends:
 				friends = "AND (scores.userid IN (SELECT user2 FROM users_relationships WHERE user1 = %(userid)s) OR scores.userid = %(userid)s)"
@@ -106,15 +106,16 @@ class scoreboard:
 			friends = "AND (scores.userid IN (SELECT user2 FROM users_relationships WHERE user1 = %(userid)s) OR scores.userid = %(userid)s)"
 		else:
 			friends = ""
-
 		# Sort and limit at the end
-		if self.mods <= -1 or self.mods & modsEnum.AUTOPLAY == 0:
+		if not glob.conf.extra["lets"]["scoreboard"]["ppboard"] and self.mods <= -1 or self.mods & modsEnum.AUTOPLAY == 0:
 			# Order by score if we aren't filtering by mods or autoplay mod is disabled
 			order = "ORDER BY score DESC"
-		elif self.mods & modsEnum.AUTOPLAY > 0:
+		elif self.mods & modsEnum.AUTOPLAY > 0 or glob.conf.extra["lets"]["scoreboard"]["ppboard"]:
 			# Otherwise, filter by pp
 			order = "ORDER BY pp DESC"
 		if self.country:
+			order = "ORDER BY pp DESC"
+		if self.friends:
 			order = "ORDER BY pp DESC"
 		limit = "LIMIT 50"
 
@@ -186,6 +187,8 @@ class scoreboard:
 		hasScore = glob.db.fetch(query, {"md5": self.beatmap.fileMD5, "userid": self.userID, "mode": self.gameMode, "mods": self.mods})
 		if hasScore is None:
 			return
+			
+		overwrite = glob.conf.extra["lets"]["scoreboard"]["ppboard"] and "pp" or "score"
 
 		# We have a score, run the huge query
 		# Base query
@@ -229,6 +232,6 @@ class scoreboard:
 
 		# Output top 50 scores
 		for i in self.scores[1:]:
-			data += i.getData(pp=(self.mods > -1 and self.mods & modsEnum.AUTOPLAY > 0) or self.country)
+			data += i.getData(pp=glob.conf.extra["lets"]["scoreboard"]["ppboard"] or (self.mods > -1 and self.mods & modsEnum.AUTOPLAY > 0))
 
 		return data

@@ -10,7 +10,10 @@ import tornado.web
 from raven.contrib.tornado import AsyncSentryClient
 import redis
 import json
+import shutil
+from distutils.version import LooseVersion
 
+from constants import rankedStatuses
 from common.constants import bcolors, mods
 from common.db import dbConnector
 from common.ddog import datadogClient
@@ -41,6 +44,8 @@ from handlers import submitModularHandler
 from handlers import uploadScreenshotHandler
 from handlers import bmsubmitGetid
 from handlers import RateHandler
+from handlers import commentHandler
+from handlers import getFullErrorHandler
 from helpers import config
 from helpers import consoleHelper
 from common import generalUtils
@@ -62,11 +67,13 @@ def make_app():
 		(r"/web/check-updates.php", checkUpdatesHandler.handler),
 		(r"/web/osu-getfavourites.php", osuGetFavourites.handler),
 		(r"/web/osu-error.php", osuErrorHandler.handler),
+		(r"/web/osu-comment.php", commentHandler.handler),
 		(r"/ss/(.*)", getScreenshotHandler.handler),
 		(r"/web/maps/(.*)", mapsHandler.handler),
 		(r"/d/(.*)", downloadMapHandler.handler),
 		(r"/s/(.*)", downloadMapHandler.handler),
 		(r"/web/replays/(.*)", getFullReplayHandler.handler),
+		(r"/web/errorlogs/(.*)", getFullErrorHandler.handler),
 
 		(r"/p/verify", redirectHandler.handler, dict(destination="https://vipsu.ml/index.php?p=2")),
 		(r"/u/(.*)", redirectHandler.handler, dict(destination="https://new.vipsu.ml/u/{}")),
@@ -87,7 +94,6 @@ def make_app():
 
 		# Not done yet
 		(r"/web/lastfm.php", emptyHandler.handler),
-		(r"/web/osu-comment.php", emptyHandler.handler),
 		(r"/web/osu-checktweets.php", emptyHandler.handler),
 		(r"/loadTest", loadTestHandler.handler),
 	], default_handler_class=defaultHandler.handler)
@@ -100,11 +106,6 @@ if __name__ == "__main__":
 		# Read config
 		consoleHelper.printNoNl("> Reading config file... ")
 		glob.conf = config.config("config.ini")
-
-		# Read additional config file
-		consoleHelper.printNoNl("> Loading additional config file... ")
-		with open("config.json", "r") as f:
-			glob.conf.extra = json.load(f)
 
 		if glob.conf.default:
 			# We have generated a default config.ini, quit server
@@ -122,6 +123,35 @@ if __name__ == "__main__":
 		else:
 			consoleHelper.printDone()
 
+			
+		# Read additional config file
+		consoleHelper.printNoNl("> Loading additional config file... ")
+		try:
+			if not os.path.isfile(glob.conf.config["custom"]["config"]):
+				consoleHelper.printWarning()
+				consoleHelper.printColored("[!] Missing config file at {}; A default one has been generated at this location.".format(glob.conf.config["custom"]["config"]), bcolors.YELLOW)
+				shutil.copy("common/default_config.json", glob.conf.config["custom"]["config"])
+
+			with open(glob.conf.config["custom"]["config"], "r") as f:
+				glob.conf.extra = json.load(f)
+
+			consoleHelper.printDone()
+		except:
+			consoleHelper.printWarning()
+			consoleHelper.printColored("[!] Unable to load custom config at {}".format(glob.conf.config["custom"]["config"]), bcolors.RED)
+			consoleHelper.printColored("[!] Make sure you have the latest osufx common submodule!", bcolors.RED)
+			sys.exit()
+
+		# Check if running common module is usable
+		if glob.COMMON_VERSION == "Unknown":
+			consoleHelper.printWarning()
+			consoleHelper.printColored("[!] You do not seem to be using osufx's common submodule... nothing will work...", bcolors.RED)
+			consoleHelper.printColored("[!] You can download or fork the submodule from {}https://github.com/osufx/ripple-python-common".format(bcolors.UNDERLINE), bcolors.RED)
+			sys.exit()
+		elif LooseVersion(glob.COMMON_VERSION_REQ) > LooseVersion(glob.COMMON_VERSION):
+			consoleHelper.printColored("[!] Your common submodule version is below the required version number for this version of lets.", bcolors.RED)
+			consoleHelper.printColored("[!] You are highly adviced to update your common submodule as stability may vary with outdated modules.", bcolors.RED)
+
 		# Check oppai
 		consoleHelper.printNoNl("> Checking oppai... ")
 		if os.path.isfile("../oppai/oppai") or os.path.isfile("../oppai/oppai.exe"):
@@ -135,7 +165,7 @@ if __name__ == "__main__":
 
 		# Create data/oppai maps folder if needed
 		consoleHelper.printNoNl("> Checking folders... ")
-		paths = [".data", ".data/replays", ".data/screenshots", ".data/pl", "../oppai", "../oppai/maps",".data/catch_the_pp", ".data/catch_the_pp/maps"]
+		paths = [".data", ".data/replays", ".data/replays_rx", ".data/screenshots", ".data/pl", ".data/beatmaps", "../oppai", "../oppai/maps",".data/catch_the_pp", ".data/catch_the_pp/maps"]
 		for i in paths:
 			if not os.path.exists(i):
 				os.makedirs(i, 0o770)
@@ -208,14 +238,16 @@ if __name__ == "__main__":
 		# Set achievements version
 		glob.redis.set("lets:achievements_version", glob.ACHIEVEMENTS_VERSION)
 		consoleHelper.printColored("Achievements version is {}".format(glob.ACHIEVEMENTS_VERSION), bcolors.YELLOW)
+		
+		# Print disallowed mods into console (Used to also assign it into variable but has been moved elsewhere)
+		unranked_mods = [key for key, value in glob.conf.extra["common"]["rankable-mods"].items() if not value]
+		
+		# Print allowed beatmap rank statuses
+		allowed_beatmap_rank = [key for key, value in glob.conf.extra["lets"]["allowed-beatmap-rankstatus"].items() if value]
+		consoleHelper.printColored("Allowed beatmap rank statuses: {}".format(", ".join(allowed_beatmap_rank)), bcolors.YELLOW)
+ 		# Make array of bools to respective rank id's
+		glob.conf.extra["_allowed_beatmap_rank"] = [getattr(rankedStatuses, key) for key in allowed_beatmap_rank] # Store the allowed beatmap rank id's into glob
 
-		# Setup allowed mods
-		ranked_mods = [item for item in glob.conf.extra["rankable-mods"] if glob.conf.extra["rankable-mods"][item]]
-		unranked_mods = [item for item in glob.conf.extra["rankable-mods"] if not glob.conf.extra["rankable-mods"][item]]
-		consoleHelper.printColored("Ranked mods  : {}".format(", ".join(ranked_mods)), bcolors.YELLOW)
-		consoleHelper.printColored("Unranked mods: {}".format(", ".join(unranked_mods)), bcolors.YELLOW)
-		glob.conf.extra["_unranked-mods"] = sum([getattr(mods, item) for item in unranked_mods]) # Store the unranked mods mask in glob
-				
 		# Discord
 		if generalUtils.stringToBool(glob.conf.config["discord"]["enable"]):
 			glob.schiavo = schiavo.schiavo(glob.conf.config["discord"]["boturl"], "**lets**")

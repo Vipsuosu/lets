@@ -19,7 +19,7 @@ from common.sentry import sentry
 MODULE_NAME = "bmsubmitGetid"
 class handler(requestsManager.asyncRequestHandler):
 	"""
-	Handler for /web/osu-screenshot.php
+	Handler for /web/osu-get-beatmap-topic.php
 	"""
 	@tornado.web.asynchronous
 	@tornado.gen.engine
@@ -42,7 +42,7 @@ class handler(requestsManager.asyncRequestHandler):
 			oldOsz2Hash  = self.get_argument("z")
 
 			if userID != 1000:
-				return self.write(return_errorcode(5, "fuck you, you are NOT Xxdstem"))
+				return self.write(return_errorcode(5, "fuck you, you are NOT Peppy"))
 			glob.db.execute("DELETE FROM gatari_beatmapsets WHERE user_id = {} AND active = -1".format(userID))
 			bmInfo = fetch_info(beatmapSetId,False)
 			if beatmapSetId > 0 and bmInfo is not None:
@@ -89,7 +89,7 @@ def authenticate_creator(userID, creatorID, username):
 	return userID == creatorID
 
 def has_special_permissions(username):
-	return username == "Xxdstem"
+	return username == "peppynator"
 
 def check_remaining_uploadcap(userID):
 	unrankedCount = glob.db.fetch("SELECT count(*) count from gatari_beatmapsets where ranked in (-1,0) and active > 0 and user_id = %s",[userID])["count"]

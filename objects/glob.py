@@ -31,3 +31,10 @@ fileBuffers = fileBuffer.buffersList()
 dog = datadogClient.datadogClient()
 schiavo = schiavo.schiavo()
 achievementClasses = {}
+ # Additional modifications
+COMMON_VERSION_REQ = "1.2.1"
+try:
+	with open("common/version") as f:
+		COMMON_VERSION = f.read().strip()
+except:
+	COMMON_VERSION = "Unknown"

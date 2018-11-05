@@ -14,7 +14,7 @@ class handler(requestsManager.asyncRequestHandler):
 	@sentry.captureTornado
 	def asyncGet(self, bid):
 		self.set_status(302, "Moved Temporarily")
-		url = "http://bm6.ppy.sh/{}.osz".format(bid)
+		url = "http://osu.vipsu.ml/s/{}".format(bid)
 		self.add_header("Location", url)
 		self.add_header("Cache-Control", "no-cache")
 		self.add_header("Pragma", "no-cache")

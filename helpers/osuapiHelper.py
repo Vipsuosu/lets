@@ -3,25 +3,11 @@ from urllib.parse import quote
 import random
 import requests
 
-from helpers import ppyFormat
 from common.log import logUtils as log
 from common import generalUtils
 from objects import glob
 from constants import exceptions
 
-def getDifficulty(beatmap_md5, nomod=True):
-	resp = requests.get("http://osu.ppy.sh/web/osu-getdifficulty.php?c[]={}".format(beatmap_md5)).text
-	if len(resp) <= 0:
-		return None
-	else:
-		data = ppyFormat.verticalSplit(resp, ["hash", "mode", "mods", "difficulty"])
-		if nomod == True:
-			newData = []
-			for diff in data:
-				if diff["mods"] == "0":
-					newData.append(diff)
-			data = newData
-		return data	
 
 def osuApiRequest(request, params, getFirst=True):
 	"""
@@ -40,6 +26,7 @@ def osuApiRequest(request, params, getFirst=True):
 	resp = None
 	try:
 		finalURL = "{}/api/{}?k={}&{}".format(glob.conf.config["osuapi"]["apiurl"], request, glob.conf.config["osuapi"]["apikey"], params)
+		log.debug(finalURL)
 		resp = requests.get(finalURL, timeout=5).text
 		data = json.loads(resp)
 		if getFirst:
@@ -51,6 +38,7 @@ def osuApiRequest(request, params, getFirst=True):
 			resp = data
 	finally:
 		glob.dog.increment(glob.DATADOG_PREFIX+".osu_api.requests")
+		log.debug(str(resp).encode("utf-8"))
 		return resp
 
 def getOsuFileFromName(fileName):
@@ -71,7 +59,7 @@ def getOsuFileFromName(fileName):
 		URL = "{}/web/maps/{}".format(glob.conf.config["osuapi"]["apiurl"], quote(fileName))
 		req = requests.get(URL, timeout=20)
 		req.encoding = "utf-8"
-		response = req.content if req.content != b'' else None
+		response = req.content
 	finally:
 		glob.dog.increment(glob.DATADOG_PREFIX+".osu_api.osu_file_requests")
 		return response

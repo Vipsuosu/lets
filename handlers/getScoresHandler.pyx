@@ -109,8 +109,7 @@ class handler(requestsManager.asyncRequestHandler):
 						"userID": userID,
 						"message": "Hi there! Scores are now sorted by PP. You can change scores sort mode by toggling the 'Auto' mod and filtering the leaderboard by Active mods. Note that this option is available only for donors and we don't recommend saving replays when the leaderboard is sorted by pp, due to some client limitations."
 					}))
-
-
+			
 			# Datadog stats
 			glob.dog.increment(glob.DATADOG_PREFIX+".served_leaderboards")
 		except exceptions.need2FAException:

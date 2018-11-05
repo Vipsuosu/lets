@@ -1,3 +1,4 @@
+import base64
 import collections
 import json
 import os
@@ -5,6 +6,7 @@ import sys
 import traceback
 import threading
 from urllib.parse import urlencode
+from dhooks.discord_hooks import Webhook
 import datetime
 import requests
 import tornado.gen
@@ -21,8 +23,11 @@ from common.ripple import userUtils
 from common.web import requestsManager
 from constants import exceptions
 from constants import rankedStatuses
+from constants.exceptions import ppCalcException
 from helpers import aeshelper
 from helpers import leaderboardHelper
+from helpers import leaderboardHelperRelax
+from helpers import replayHelper
 from objects import glob
 from common.sentry import sentry
 from secret import butterCake
@@ -111,6 +116,11 @@ class handler(requestsManager.asyncRequestHandler):
 			log.info("{} has submitted a score on {}...".format(username, scoreData[0]))
 			s = score.score()
 			s.setDataFromScoreData(scoreData)
+			
+			if s.completed == -1:
+				# Duplicated score
+				log.warning("Duplicated score detected, this is normal right after restarting the server")
+				return
 
 			oldStats = userUtils.getUserStats(userID, s.gameMode)
 			if ((s.passed == False and s.score < 1000) or s.score < 10):
@@ -118,17 +128,33 @@ class handler(requestsManager.asyncRequestHandler):
 			# Get beatmap info
 			beatmapInfo = beatmap.beatmap()
 			beatmapInfo.setDataFromDB(s.fileMd5)
+			
 			# Make sure the beatmap is submitted and updated
-			if beatmapInfo.rankedStatus <= rankedStatuses.NEED_UPDATE:
-				
-				log.debug("Beatmap is not submitted/outdated/unknown. Score submission aborted.")
+			#if beatmapInfo.rankedStatus == rankedStatuses.NOT_SUBMITTED or beatmapInfo.rankedStatus == rankedStatuses.NEED_UPDATE or beatmapInfo.rankedStatus == rankedStatuses.UNKNOWN:
+			#	log.debug("Beatmap is not submitted/outdated/unknown. Score submission aborted.")
+			#	return
+
+			# Check if the ranked status is allowed
+			if beatmapInfo.rankedStatus not in glob.conf.extra["_allowed_beatmap_rank"]:
+				log.debug("Beatmap's rankstatus is not allowed to be submitted. Score submission aborted.")
 				return
+				
 			# Calculate PP
-			if s.completed > 0 and s.pp == 0.00:
+			midPPCalcException = None
+			try:
 				s.calculatePP()
+			except Exception as e:
+				# Intercept ALL exceptions and bypass them.
+				# We want to save scores even in case PP calc fails
+				# due to some rippoppai bugs.
+				# I know this is bad, but who cares since I'll rewrite
+				# the scores server again.
+				log.error("Caught an exception in pp calculation, re-raising after saving score in db")
+				s.pp = 0
+				midPPCalcException = e
 
 			# Restrict obvious cheaters
-			if (s.pp >= 900 and s.gameMode == gameModes.STD and (s.mods & mods.RELAX < 1 and s.mods & mods.RELAX2 < 1) ) and restricted == False:
+			if (glob.conf.extra["lets"]["submit"]["max-std-pp"] >= 0 and s.pp >= glob.conf.extra["lets"]["submit"]["max-std-pp"] and s.gameMode == gameModes.STD) and restricted == False:
 				userUtils.restrict(userID)
 				restricted = True
 				userUtils.appendNotes(userID, "Restricted due to too high pp gain ({}pp)".format(s.pp))
@@ -146,10 +172,18 @@ class handler(requestsManager.asyncRequestHandler):
 				log.warning("**{}** ({}) has been restricted due to notepad hack".format(username, userID), "cm")
 				return
 			# Save score in db
-			s.saveScoreInDB()
+			if bool(s.mods & 128) == True:
+				s.saveRelaxScoreInDB()
+			else:
+				s.saveScoreInDB()
 			# Let the api know of this score
 			if s.scoreID:
 				glob.redis.publish("api:score_submission", s.scoreID)
+				
+			# Re-raise pp calc exception after saving score, cake, replay etc
+			# so Sentry can track it without breaking score submission
+			if midPPCalcException is not None:
+				raise ppCalcException(midPPCalcException)
 
 			# Client anti-cheat flags
 			'''ignoreFlags = 4
@@ -211,6 +245,19 @@ class handler(requestsManager.asyncRequestHandler):
 					replay = self.request.files["score"][0]["body"]
 					with open(".data/replays/replay_{}.osr".format(s.scoreID), "wb") as f:
 						f.write(replay)
+						
+					# We run this in a separate thread to avoid slowing down scores submission,
+					# as cono needs a full replay
+					threading.Thread(target=lambda: glob.redis.publish(
+						"cono:analyze", json.dumps({
+							"score_id": s.scoreID,
+							"beatmap_id": beatmapInfo.beatmapID,
+							"user_id": s.playerUserID,
+							"replay_data": base64.b64encode(
+								replayHelper.buildFullReplay(s.scoreID, rawReplay=replay)
+							).decode()
+						})
+					)).start()
 
 			# Make sure the replay has been saved (debug)
 			if not os.path.isfile(".data/replays/replay_{}.osr".format(s.scoreID)) and s.completed == 3:
@@ -245,8 +292,10 @@ class handler(requestsManager.asyncRequestHandler):
 				# Get new stats
 				newUserData = userUtils.getUserStats(userID, s.gameMode)
 				glob.userStatsCache.update(userID, s.gameMode, newUserData)
-				if s.completed == 3:
+				if s.completed == 3 and bool(s.mods & 128) == False:
 					leaderboardHelper.update(userID, newUserData["pp"], s.gameMode)
+				elif s.completed == 3 and bool(s.mods & 128) == True:
+					leaderboardHelperRelax.update(userID, newUserData["pp"], s.gameMode)				
 
 			# TODO: Update total hits and max combo
 			# Update latest activity
@@ -274,7 +323,11 @@ class handler(requestsManager.asyncRequestHandler):
 				newScoreboard.setPersonalBest()
 
 				# Get rank info (current rank, pp/score to next rank, user who is 1 rank above us)
-				rankInfo = leaderboardHelper.getRankInfo(userID, s.gameMode)
+				if bool(s.mods & 128):
+					rankInfo = leaderboardHelperRelax.getRankInfo(userID, s.gameMode)
+				else:
+					rankInfo = leaderboardHelper.getRankInfo(userID, s.gameMode)
+				
 				playsInfo = glob.db.fetch("SELECT * FROM beatmap_plays WHERE beatmap_md5 = %s",[beatmapInfo.fileMD5])
 				if playsInfo is None:
 					playsInfo = {'passcount': 1, 'playcount': 1}
@@ -308,15 +361,18 @@ class handler(requestsManager.asyncRequestHandler):
 						raise Exception
 
 					# Get best score if
-					bestID = int(glob.db.fetch("SELECT id FROM scores WHERE userid = %s AND play_mode = %s AND completed = 3 ORDER BY pp DESC LIMIT 1", [userID, s.gameMode])["id"])
-					if bestID == s.scoreID:
-						# Dat pp achievement
-						output["achievements-new"] = "all-secret-jackpot+Here come dat PP+Oh shit waddup"
-					else:
-						raise Exception
+					if (s.mods & mods.RELAX) > 0 or (s.mods & mods.RELAX2) > 0:
+						bestID = int(glob.db.fetch("SELECT id FROM scores_rx WHERE userid = %s AND play_mode = %s AND completed = 3 ORDER BY pp DESC LIMIT 1", [userID, s.gameMode])["id"])
+					else: 
+						bestID = int(glob.db.fetch("SELECT id FROM scores WHERE userid = %s AND play_mode = %s AND completed = 3 ORDER BY pp DESC LIMIT 1", [userID, s.gameMode])["id"])
+						if bestID == s.scoreID:
+							# Dat pp achievement
+							output["achievements-new"] = "all-secret-jackpot+Here come dat PP+Oh shit waddup"
+						else:
+							raise Exception
 				except:
-					# No achievement
-					output["achievements-new"] = ""
+						# No achievement
+						output["achievements-new"] = ""
 				output["onlineScoreId"] = s.scoreID
 
 				# Build final string
@@ -334,15 +390,15 @@ class handler(requestsManager.asyncRequestHandler):
 				log.debug(msg)
 				s.calculateAccuracy()
 				# scores discord/VK bot
-				#userStats = userUtils.getUserStats(userID, s.gameMode)
-				if s.completed == 3 and restricted == False and beatmapInfo.rankedStatus >= rankedStatuses.RANKED and s.pp > 250:			
-					vk = glob.db.fetch("select vk from users where id = %s",[userID])['vk']		
+				userStats = userUtils.getUserStats(userID, s.gameMode)
+				if s.completed == 3 and restricted == False and beatmapInfo.rankedStatus >= rankedStatuses.RANKED and s.pp > 10:
 					glob.redis.publish("scores:new_score", json.dumps({
 					"gm":s.gameMode,
-					"user":{"username":username, "userID": userID, "vk":vk,"rank":newUserData["gameRank"],"oldaccuracy":oldStats["accuracy"],"accuracy":newUserData["accuracy"], "oldpp":oldStats["pp"],"pp":newUserData["pp"]},
+					"user":{"username":username, "userID": userID, "rank":newUserData["gameRank"],"oldaccuracy":oldStats["accuracy"],"accuracy":newUserData["accuracy"], "oldpp":oldStats["pp"],"pp":newUserData["pp"]},
 					"score":{"scoreID": s.scoreID, "mods":s.mods, "accuracy":s.accuracy, "missess":s.cMiss, "combo":s.maxCombo, "pp":s.pp, "rank":newScoreboard.personalBestRank, "ranking":s.rank},
 					"beatmap":{"beatmapID": beatmapInfo.beatmapID, "beatmapSetID": beatmapInfo.beatmapSetID, "max_combo":beatmapInfo.maxCombo, "song_name":beatmapInfo.songName}
 					}))
+
 
 				# replay anticheat
 
@@ -359,27 +415,97 @@ class handler(requestsManager.asyncRequestHandler):
 					"rawpp":newUserData["pp"]
 					}))
 				# send message to #announce if we're rank #1
-				if newScoreboard.personalBestRank < 101 and s.completed == 3 and restricted == False and beatmapInfo.rankedStatus >= rankedStatuses.RANKED:
+				if newScoreboard.personalBestRank < 51 and s.completed == 3 and restricted == False and beatmapInfo.rankedStatus >= rankedStatuses.RANKED:
 					userUtils.logUserLog("achieved #{} rank on ".format(newScoreboard.personalBestRank),s.fileMd5, userID, s.gameMode)
-					if newScoreboard.personalBestRank == 1 and oldPersonalBestRank != 1:
-					
-						firstPlacesUpdateThread = threading.Thread(None,  lambda : userUtils.recalcFirstPlaces(userID))
-						firstPlacesUpdateThread.start()
-					
-						annmsg = "[https://new.vipsu.ml/u/{} {}] achieved rank #1 on [https://new.vipsu.ml/b/{} {}] ({})".format(
-						userID,
-						username.encode().decode("ASCII", "ignore"),
-						beatmapInfo.beatmapID,
-						beatmapInfo.songName.encode().decode("ASCII", "ignore"),
-						gameModes.getGamemodeFull(s.gameMode)
-						)
+					if newScoreboard.personalBestRank < 2:
+						annmsg = "[{} - https://new.vipsu.cf/u/{}] achieved rank #1 on [https://osu.ppy.sh/b/{} {}] ({}) {}pp".format(username, userID, beatmapInfo.beatmapID, beatmapInfo.songName, gameModes.getGamemodeFull(s.gameMode),round(s.pp, 2))
 						params = urlencode({"k": glob.conf.config["server"]["apikey"], "to": "#announce", "msg": annmsg})
 						requests.get("{}/api/v1/fokabotMessage?{}".format(glob.conf.config["server"]["banchourl"], params))
 						if (len(newScoreboard.scores) > 2):
-							userUtils.logUserLog("has lost first place on ",s.fileMd5, newScoreboard.scores[2].playerUserID, s.gameMode)
-							firstPlacesUpdateThread = threading.Thread(None, lambda : userUtils.recalcFirstPlaces(newScoreboard.scores[2].playerUserID))
-							firstPlacesUpdateThread.start()
+							userUtils.logUserLog("has lost first place on ",s.fileMd5, newScoreboard.scores[2].playerUserID, s.gameMode)	
 								
+					# upon new #1 = send the score to the discord bot
+					# s=0 = regular && s=1 = relax
+					ppGained = newUserData["pp"] - oldUserData["pp"]
+					gainedRanks = oldRank - rankInfo["currentRank"]
+					# webhook to discord
+
+					#TEMPORARY mods handle
+					ScoreMods = ""
+					
+					if s.mods == 0:
+						ScoreMods += "nomod"
+					if s.mods & mods.NOFAIL > 0:
+						ScoreMods += "NF"
+					if s.mods & mods.EASY > 0:
+						ScoreMods += "EZ"
+					if s.mods & mods.HIDDEN > 0:
+						ScoreMods += "HD"
+					if s.mods & mods.HARDROCK > 0:
+						ScoreMods += "HR"
+					if s.mods & mods.DOUBLETIME > 0:
+						ScoreMods += "DT"
+					if s.mods & mods.HALFTIME > 0:
+						ScoreMods += "HT"
+					if s.mods & mods.FLASHLIGHT > 0:
+						ScoreMods += "FL"
+					if s.mods & mods.SPUNOUT > 0:
+						ScoreMods += "SO"
+					if s.mods & mods.TOUCHSCREEN > 0:
+						ScoreMods += "TD"
+					if s.mods & mods.RELAX > 0:
+						ScoreMods += "RX"
+					if s.mods & mods.RELAX2 > 0:
+						ScoreMods += "AP"
+					type = glob.conf.extra["lets"]["discord"]["type"]
+					url = glob.conf.extra["lets"]["discord"]["webhook"]
+
+					if type == "regular":
+						embed = Webhook(url, color=0x35b75c)
+						embed.set_author(name=username.encode().decode("ASCII", "ignore"), icon='https://i.imgur.com/rdm3W9t.png')
+						embed.set_desc("Achieved #1 on mode **{}**, {} +{} on regular!".format(
+						gameModes.getGamemodeFull(s.gameMode),
+						beatmapInfo.songName.encode().decode("ASCII", "ignore"),
+						ScoreMods
+						))
+						embed.add_field(name='Total: {}pp'.format(
+						float("{0:.2f}".format(s.pp))
+						),value='Gained: +{}pp'.format(
+						float("{0:.2f}".format(ppGained))
+						))
+						embed.add_field(name='Actual rank: {}'.format(
+						rankInfo["currentRank"]
+						),value='[Download Link](http://mirror.catgirls.fun/d/{})'.format(
+						beatmapInfo.beatmapSetID
+						))
+						embed.set_image('https://assets.ppy.sh/beatmaps/{}/covers/cover.jpg'.format(
+						beatmapInfo.beatmapSetID
+						))
+						embed.post()
+					else:
+						url = 'https://discordapp.com/api/webhooks/485539881624403998/nvz14NtiTZWI4FIVLzZAQaPNiD0TmBF2GvSqcW3EX0p4tJfT3lLJ7IPeegbR3_3oBgPi'
+						embed = Webhook(url, color=0x9627c5)
+						embed.set_author(name=username.encode().decode("ASCII", "ignore"), icon='https://i.imgur.com/rdm3W9t.png')
+						embed.set_desc("Achieved #1 on mode **{}**, {} +{} on relax!".format(
+						gameModes.getGamemodeFull(s.gameMode),
+						beatmapInfo.songName.encode().decode("ASCII", "ignore"),
+						ScoreMods
+						))
+						embed.add_field(name='Total: {}pp'.format(
+						float("{0:.2f}".format(s.pp))
+						),value='Gained: +{}pp'.format(
+						float("{0:.2f}".format(ppGained))
+						))
+						embed.add_field(name='Actual rank: {}'.format(
+						rankInfo["currentRank"]
+						),value='[Download Link](http://mirror.catgirls.fun/d/{})'.format(
+						beatmapInfo.beatmapSetID
+						))
+						embed.set_image('https://assets.ppy.sh/beatmaps/{}/covers/cover.jpg'.format(
+						beatmapInfo.beatmapSetID
+						))
+						embed.post()
+						
 				# Write message to client
 				self.write(msg)
 			else:

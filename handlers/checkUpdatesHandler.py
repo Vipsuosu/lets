@@ -29,7 +29,7 @@ class handler(requestsManager.asyncRequestHandler):
 				self.write("nope")
 				return
 
-			response = requests.get("https://osu.ppy.sh/web/check-updates.php?{}".format(urlencode(args)))
+			response = requests.get("http://m.vipsu.aecx.cc/check-updates.php?{}".format(urlencode(args)))
 			self.write(response.text)
 		except Exception as e:
 			log.error("check-updates failed: {}".format(e))
